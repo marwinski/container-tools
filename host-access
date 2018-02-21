@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# Log on to the host from a privileged container who has the
+# host filesystem mounted read/write on /host and that has
+# full network access
+
+apt update
+apt -y install openssh-client net-tools less iproute2 iputils-ping bridge-utils
+
+ssh-keygen -f hack.id -N ''
+cat hack.id.pub >>/host/home/core/.ssh/authorized_keys
+host_ip=$(ip address show dev eth0 | grep "inet " | cut -d' ' -f6 | cut -d'/' -f1)
+ssh -i hack.id core@${host_ip}
