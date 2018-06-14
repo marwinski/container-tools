@@ -1,0 +1,21 @@
+#!/bin/bash
+
+c=$(kubectl get po |grep priv-pod |grep Running |wc -l)
+
+if [ c == "0" ] ; then
+
+  echo "deploying the priviliged pod"
+  kubectl apply -f priv-pod.yaml
+
+  while true ; do 
+    c=$(kubectl get po |grep priv-pod |grep Running |wc -l)
+    if [ c == "1" ] ; then
+      break
+    fi
+  done
+fi
+
+kubectl cp host-access default/priv-pod:/host-access
+
+kubectl exec -it priv-pod -- bash /host-access
+
