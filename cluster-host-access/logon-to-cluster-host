@@ -2,16 +2,17 @@
 
 c=$(kubectl get po |grep priv-pod |grep Running |wc -l)
 
-if [ c == "0" ] ; then
+if [ $c -eq 0 ] ; then
 
   echo "deploying the priviliged pod"
   kubectl apply -f priv-pod.yaml
 
   while true ; do 
     c=$(kubectl get po |grep priv-pod |grep Running |wc -l)
-    if [ c == "1" ] ; then
+    if [ $c -eq 1 ] ; then
       break
     fi
+    sleep 2
   done
 fi
 
