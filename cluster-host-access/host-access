@@ -4,10 +4,9 @@
 # host filesystem mounted read/write on /host and that has
 # full network access
 
-apt update
-apt -y install openssh-client net-tools less iproute2 iputils-ping bridge-utils
-
 if [ ! -f "hack.id" ] ; then
+  apt update
+  apt -y install openssh-client net-tools less iproute2 iputils-ping bridge-utils
   ssh-keygen -f hack.id -N ''
   cat hack.id.pub >>/host/home/core/.ssh/authorized_keys
 fi
