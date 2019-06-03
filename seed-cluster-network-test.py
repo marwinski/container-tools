@@ -4,6 +4,8 @@ import subprocess
 import sys
 import re
 import json
+import argparse
+import os
 
 #----------------------------------------------------------------------------
 
@@ -27,6 +29,12 @@ class Node:
         can_reach_nodes = " ".join(this.can_reach)
         return (this.name + " " + this.ip + " " + this.calico_pod_name + "\n" +
                 "Can reach nodes: " + can_reach_nodes)
+
+class Pod:
+    pass
+
+class Container:
+    pass
 
 class ControlPlane:
     pass
@@ -135,22 +143,151 @@ def examine_shoot_control_plane(ns):
         print(r.stdout)
 
 
+def get_pods():
+    pods = subprocess.run("kubectl get pods --all-namespaces -o json", shell=True, capture_output=True, check=True, encoding="utf-8")
+    pods_json = json.loads(pods.stdout)
+    pods_array = []
+    for it in pods_json["items"]:
+        metadata = it["metadata"]
+        if "namespace" in metadata and metadata["namespace"] == "kube-system":
+            continue
+        p = Pod()
+        pods_array.append(p)
+        p.name = metadata["name"]
+        p.namespace = metadata["namespace"]
+        status = it["status"]
+        p.hostIP = status["hostIP"]
+        if "podIP" in status:
+            p.podIP = status["podIP"] 
+        p.containers = []
+        if "containerStatuses" in status:
+            for cs in status["containerStatuses"]:
+                if "containerID" in cs and "image" in cs:
+                    c = Container()
+                    c.containerID = cs["containerID"]
+                    c.image = cs["image"]
+                    p.containers.append(c)
+    return pods_array
+
+def get_container_id(pod, id):
+    for c in pod.containers:
+        if c.image.find(id) != -1:
+            if c.containerID.startswith("docker://"):
+                return c.containerID[9:]
+    return None
+
+def ping_etcd_from_apiserver(api_server, root_pod_map, etcd_pod):
+    print("kube-apiserver {}/{} connectivity test with {}/{}".format(api_server.namespace, api_server.name, etcd_pod.namespace, etcd_pod.name))
+    containerID = get_container_id(api_server, "k8s.gcr.io/hyperkube")
+    root_pod = root_pod_map[api_server.hostIP]
+
+    cmd = "kubectl exec -it {} -- chroot /root docker inspect {}".format(root_pod.name, containerID)
+    print("Running " + cmd)
+    inspect = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    if inspect.returncode != 0:
+        print("Unable to run test from pod " + api_server.name + ": " + inspect.stderr)
+        return
+    inspect_json = json.loads(inspect.stdout)
+    api_server_pid = inspect_json[0]["State"]["Pid"]
+
+    cmd = "kubectl exec -it {} -- nsenter -n/proc/{}/ns/net  -- nc -vz -w 2 {} {}".format(root_pod.name, api_server_pid, etcd_pod.podIP, 2379)
+    print("Running " + cmd)
+    nc = subprocess.run(cmd, shell=True, capture_output=True, encoding="utf-8")
+    if nc.returncode != 0:
+        print("failed: " + nc.stdout + nc.stderr)
+    else:
+        print("success")
+    
+def check_etcd_from_apiservers(node_map, pods):
+
+    etcds = filter(lambda x: x.name == "etcd-main-0", pods)
+    ntpods = filter(lambda x: x.name.startswith("network-test-"), pods)
+    api_servers = filter(lambda x: x.name.startswith("kube-apiserver"), pods)
+    ntmap = {}
+    for n in ntpods:
+        ntmap[n.podIP] = n
+
+    shoot_etcd_map = {}
+    for etcd in etcds:
+        shoot_etcd_map[etcd.namespace] = etcd
+
+    for aserver in api_servers:
+        ns = aserver.namespace
+        target_etcd = shoot_etcd_map[ns]
+        aserver.target_etcd = target_etcd
+        ping_etcd_from_apiserver(aserver, ntmap, target_etcd)
+
 def get_namespaces():
     nodes = subprocess.run(get_namespaces_cmd, shell=True, capture_output=True, check=True, encoding="utf-8")
     ns = nodes.stdout.split(" ")
     return list(filter(lambda x: x.startswith("shoot--"), ns))
 
-if __name__ == "__main__":
+def deploy_root_daemonset():
+    daemonset_path = os.path.dirname(__file__)
+    daemonset_file = os.path.join(daemonset_path, "privileged-daemonset.yaml")
 
+    cmd = "kubectl apply -f " + daemonset_file
+    nodes = subprocess.run(cmd, shell=True, capture_output=True, check=True, encoding="utf-8")
+    # wait until running
+    cmd = "kubectl get pods | grep network-test | awk '{ print $1,$3 }'"
+    retries = 0
+    running = False
+    while not running and retries < 20:
+        retries += 1
+        res = subprocess.run(cmd, shell=True, capture_output=True, check=True, encoding="utf-8")
+        if res.returncode == 0:
+            out = res.stdout.split("\n")
+            if len(out) == 0:
+                # no process, not running
+                continue 
+            for l in out:
+                n = l.split(" ")
+                if n != "Running":
+                    continue
+            running = True
+
+    if not running:
+        raise Exception("Not all necessary network-test pods are running.")
+
+
+def undeploy_root_daemonset():
+    cmd = "kubectl delete daemonset network-test"
+    subprocess.run(cmd, shell=True, capture_output=True, check=True, encoding="utf-8")
+
+#----------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Seed cluster connectivity test.")
+    parser.add_argument("--nodes", action="store_true", help="node connectivity test")
+    parser.add_argument("--control-planes", action="store_true", help="control plane components connectivity test")
+    args = parser.parse_args()
+    if not (args.nodes or args.control_planes):
+        parser.print_help()
+        sys.exit(1)
+
+ 
     try:
-        node_map = get_cluster_nodes()
-        run_ping_test(node_map)
-        print_statistics(node_map)
+        deploy_root_daemonset()
 
-        #ns = get_namespaces()
-        #for n in ns:
-        #    examine_shoot_control_plane(n)
+        node_map = get_cluster_nodes()
+        if args.nodes:
+            print("Running node connectivity test.")
+            run_ping_test(node_map)
+            print_statistics(node_map)
+
+        if args.control_planes:
+
+            ns = get_namespaces()
+            pods = get_pods()
+            check_etcd_from_apiservers(node_map, pods)
+#            for n in ns:
+#                examine_shoot_control_plane(n)
     except subprocess.CalledProcessError as e:        
         print(e)
         print(e.stdout)
         print(e.stderr)
+    finally:
+        undeploy_root_daemonset()
+
+if __name__ == "__main__":
+    main()
