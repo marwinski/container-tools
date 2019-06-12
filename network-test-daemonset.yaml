@@ -14,7 +14,7 @@ spec:
     spec:
       hostNetwork: true
       hostPID: true
-      restartPolicy: Never
+      restartPolicy: Always
       containers:
       - image: alpine:3.9
         imagePullPolicy: IfNotPresent
