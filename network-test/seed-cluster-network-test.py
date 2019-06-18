@@ -344,7 +344,7 @@ def main():
     parser = argparse.ArgumentParser(description="Seed cluster connectivity test.")
     parser.add_argument("--nodes", action="store_true", help="node connectivity test")
     parser.add_argument("--control-planes", action="store_true", help="control plane components connectivity test")
-    parser.add_argument("--seeds", action="append", help="seed cluster namespace (seed--<project>-->name>")
+    parser.add_argument("--seed", action="append", help="seed cluster namespace (seed--<project>-->name> (use multiple times for multiple control planes)")
     args = parser.parse_args()
     if not (args.nodes or args.control_planes):
         parser.print_help()
@@ -370,18 +370,18 @@ def main():
                 print("The are no control planes in this cluster.")
                 sys.exit(1)
             selected_shoots = set()
-            if args.seeds is not None:
+            if args.seed is not None:
                 # only test names seeds but make sure they exist
                 ns_set = set()
                 for i in ns:
                     ns_set.add(i.name)
-                for i in args.seeds:
+                for i in args.seed:
                     if not i in ns_set:
                         print("Control plane for cluster {} not in seed.".format(i))
                         sys.exit(1)
             deploy_root_daemonset()
             pods = get_cp_pods()
-            success = check_etcd_from_apiservers(node_map, pods, args.seeds)
+            success = check_etcd_from_apiservers(node_map, pods, args.seed)
             if not success:
                 test_success = False
     except subprocess.CalledProcessError as e:        
