@@ -73,7 +73,7 @@ class Pod:
             p.hostIP = i.status.host_ip
             p.podIP  = i.status.pod_ip
             p.status = i.status.phase
-            if hasattr(i.status, "container_statuses"):
+            if hasattr(i.status, "container_statuses") and i.status.container_statuses is not None:
                 p.containers = []
                 for cs in i.status.container_statuses:
                     if hasattr(cs, "container_id") and hasattr(cs, "image"):
