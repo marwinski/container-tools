@@ -30,6 +30,8 @@ get_control_plane_pods="kubectl get pods -n %s -o json | jq '[.items[]|{\"name\"
 
 PINGMANY_FILE = os.path.join(os.path.dirname(__file__), "pingmany")
 DAEMONSET_FILE = os.path.join(os.path.dirname(__file__), "network-test-daemonset.yaml")
+
+POD_RUNNING_STATUS = "Running"
 #----------------------------------------------------------------------------
 
 
@@ -214,6 +216,9 @@ def get_container_id(pod, id):
 
 
 def ping_etcd_from_apiserver(api_server, root_pod_map, etcd_pod):
+    if api_server.status != POD_RUNNING_STATUS:
+        print("{}/{} is not running (status: {}). Ignoring".format(api_server.namespace, api_server.name, api_server.status))
+        return True
     print("kube-apiserver {}/{} connectivity test with {}/{}".format(api_server.namespace, api_server.name, etcd_pod.namespace, etcd_pod.name))
     containerID = get_container_id(api_server, "k8s.gcr.io/hyperkube")
     if containerID is None:
@@ -290,7 +295,7 @@ def is_deamon_set_running():
         pods = Pod.read_pods(label_selector="k8s-app=network-test")
         for i in pods:
             print("{} {}".format(i.name, i.status))
-            if i.status == "Running":
+            if i.status == POD_RUNNING_STATUS:
                 pods_running = pods_running + 1
     if pods_running == num_nodes:
         return True
