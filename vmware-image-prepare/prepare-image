@@ -1,0 +1,59 @@
+#!/bin/bash -e
+#---help---
+# Usage: prepare-image [options] filename
+#---help---
+
+PROGNAME=prepare-image
+
+help() {
+    sed -En '/^#---help---/,/^#---help---/p' "$0" | sed -E 's/^# ?//; 1d;$d;'
+    exit ${1:-0}
+}
+
+opts=$(getopt -n $PROGNAME -o hf:p:s:n: -l folder:,pool:,ds:,network:,help -- "$@") || help 1 >&2
+eval set -- "$opts"
+while [ $# -gt 0 ]; do
+    n=2
+    case "$1" in
+        -f | --folder) FOLDER="$2";;
+        -p | --pool) POOL="$2";;
+        -s | --ds) DS="$2";;
+        -n | --network) NETWORK="$2";;
+        -h | --help) help 1;;
+        *) shift; break;;
+    esac
+    shift $n
+done
+
+IMAGE=$1
+
+[[ $# = 1 ]] || (echo "must specify image file" ; exit 1) 
+[[ -f "${IMAGE}" ]] || (echo "image file $1 does not exist" ; exit 1)
+
+[[ ! -z "$FOLDER" ]] || (echo "must specify a folder" ; exit 1)
+[[ ! -z "$DS" ]] || (echo "must specify a datastore" ; exit 1)
+[[ ! -z "$POOL" ]] || (echo "must specify a resource pool" ; exit 1)
+[[ ! -z "$NETWORK" ]] || (echo "must specify a network" ; exit 1)
+
+
+
+tmp_dir=$(mktemp -d -t img-XXXXXXXXXX)
+#trap "rm -rf $tmp_dir"
+
+govc import.spec bionic-server-cloudimg-amd64.ova | python -m json.tool > ${tmp_dir}/import-spec-tmpl.json
+
+user_data=$(base64 -w0 user-data-no-user.json)
+
+jq '.NetworkMapping[0].Name = "VM Network"' ${tmp_dir}/import-spec-tmpl.json | \
+    jq '.NetworkMapping[0].Network = "'${NETWORK}'"' | \
+    jq '(.PropertyMapping[] |  select(.Key == "user-data") | .Value) = "'${user_data}'"'>${tmp_dir}/import-spec.json
+
+#user_data=$(cat user-data.json)
+#jq '.'
+
+#base64 -w0 user-data.json >${tmp_dir}/user-data.json.base64
+# insert string into config
+
+
+govc import.ova -ds=${DS} -pool=${POOL} -folder=${FOLDER} -options=${tmp_dir}/import-spec.json "${IMAGE}"
+

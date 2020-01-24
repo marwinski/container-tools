@@ -1,0 +1,37 @@
+#cloud-config
+groups:
+  - docker
+apt:
+  sources:
+    docker:
+      arches: amd64
+      source: "deb https://download.docker.com/linux/ubuntu bionic stable"
+      keyserver: "hkp://keyserver.ubuntu.com:80"
+      keyid: 0EBFCD88
+package_upgrade: true
+packages:
+  - [docker-ce, '5:19.03.5~3-0~ubuntu-bionic']
+runcmd:
+  - swapoff --all
+  - sed -ri '/\sswap\s/s/^#?/#/' /etc/fstab
+  - mkdir -p /etc/systemd/system/docker.service.d
+  - systemctl daemon-reload
+  - systemctl restart docker
+# TODO: leave this to the operating sysem setup !?
+#  - sysctl net.bridge.bridge-nf-call-iptables=1
+#  - sysctl net.netfilter.nf_conntrack_max = 1048576
+#  - sysctl net.bridge.bridge-nf-call-ip6tables=1
+#  - 'echo "disable_vmware_customization: false" >> /etc/cloud/cloud.cfg'
+#  - sed -i 's/D \/tmp 1777 root root -/#D \/tmp 1777 root root -/g' /usr/lib/tmpfiles.d/tmp.conf
+  - echo -n > /etc/machine-id
+  - cloud-init clean
+# bug in cloud-init, after "cloud-init clean" the 
+# /var/lib/cloud/instance remains. It should actually be 
+# symbolic link. cloud-init fails on this on the next start
+  - rm -rf /var/lib/cloud/instance
+  - rm -rf /var/lib/cloud/instances
+#
+final_message: "The system is prepped, after $UPTIME seconds"
+power_state:
+  timeout: 60
+  mode: poweroff
